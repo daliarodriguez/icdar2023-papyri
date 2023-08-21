@@ -1,6 +1,9 @@
 """
 This code base on the official Pytorch TORCHVISION OBJECT DETECTION FINETUNING TUTORIAL
 https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html
+
+A fasterrcnn_resnet50 was trained during 20 epochs.
+The mean average precision at 0.5-0.95 IOU was 0.35 on detection, 0.26 on recognition
 """
 import os
 import torch
@@ -43,17 +46,20 @@ mapping = {
     225: 24,
 }
 
-class DRoGLoPDataset(torch.utils.data.Dataset):
+class HomerCompDataset(torch.utils.data.Dataset):
     def __init__(self, transforms=None, isTrain=False):
         self.transforms = transforms
-        with open("image_list", "rb") as fp:
+        if not os.path.exists(os.path.join("HomerCompTraining", "image_list.bin")):
+            print('Place image_list.bin in HomerCompTraining/')
+            quit()
+        with open(os.path.join("HomerCompTraining", "image_list.bin"), "rb") as fp:
             b = pickle.load(fp)
         train, val = train_test_split(b,random_state=8)
         if isTrain:
             imgs = list(train)
         else:
             imgs = list(val)
-        jFile = open(os.path.join("DRoGLoP_competition", "DRoGLoP_training_coco.json"))
+        jFile = open(os.path.join("HomerCompTraining", "HomerCompTrainingReadCoco.json"))
         self.data = json.load(jFile)
         jFile.close()
         ids = []
@@ -102,7 +108,7 @@ class DRoGLoPDataset(torch.utils.data.Dataset):
         target["area"] = area
         target["iscrowd"] = iscrowd
 
-        src_folder = os.path.join("DRoGLoP_competition", "DRoGLoP_training_images")
+        src_folder = os.path.join("HomerCompTraining", "images", "homer2")
         fname = os.path.join(src_folder, image_folder, image_file)
         img = Image.open(fname).convert('RGB')
         img.resize((1000, round(img.size[1]*1000.0/float(img.size[0]))), Image.BILINEAR)
@@ -121,14 +127,16 @@ def get_transform(train):
         transforms.append(T.RandomHorizontalFlip(0.5))
         transforms.append(T.FixedSizeCrop((672,672)))
         transforms.append(T.RandomPhotometricDistort())
+    else:
+        transforms.append(T.FixedSizeCrop((672,672)))
     return T.Compose(transforms)
 
 def main():
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     num_classes = 25
-    dataset = DRoGLoPDataset(transforms=get_transform(True),isTrain=True)
-    dataset_test = DRoGLoPDataset(transforms=get_transform(False),isTrain=False)
+    dataset = HomerCompDataset(transforms=get_transform(True),isTrain=True)
+    dataset_test = HomerCompDataset(transforms=get_transform(False),isTrain=False)
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=2, shuffle=True, num_workers=4,
@@ -143,11 +151,11 @@ def main():
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     model.to(device)
 
+    
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=0.001, momentum=0.8, weight_decay=0.0004)
     lr_scheduler1 = torch.optim.lr_scheduler.StepLR(optimizer,step_size=1,gamma=2)
     lr_scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer,step_size=3,gamma=0.85)
-
     num_epochs = 60
     for epoch in range(num_epochs):
         train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
@@ -164,4 +172,44 @@ def main():
 
     print("That's it!")
 
-main()
+
+def simple_fine_tune() :
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    num_classes = 25
+    dataset = HomerCompDataset(transforms=get_transform(True),isTrain=True)
+    dataset_test = HomerCompDataset(transforms=get_transform(False),isTrain=False)
+
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=2, shuffle=True, num_workers=4,
+        collate_fn=utils.collate_fn)
+
+    #data_loader_test = torch.utils.data.DataLoader(
+    #    dataset_test, batch_size=1, shuffle=False, num_workers=4,
+    #    collate_fn=utils.collate_fn)
+
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+    model.to(device)
+
+    checkpoint = torch.load("model_detection.pt", map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.SGD(params, lr=0.001, momentum=0.8, weight_decay=0.0004)
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    num_epochs = 20
+
+    for epoch in range(num_epochs):
+        train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
+        #evaluate(model, data_loader_test, device=device)
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            }, "model_detection.pt")
+
+    print("That's it!")
+
+if __name__ == '__main__':
+    simple_fine_tune()
