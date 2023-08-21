@@ -1,9 +1,6 @@
 """
 This code base on the official Pytorch TORCHVISION OBJECT DETECTION FINETUNING TUTORIAL
 https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html
-
-A fasterrcnn_resnet50 was trained during 20 epochs.
-The mean average precision at 0.5-0.95 IOU was 0.35 on detection, 0.26 on recognition
 """
 import os
 import torch
